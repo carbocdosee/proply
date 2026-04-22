@@ -35,6 +35,10 @@ function createAuthStore() {
 			set({ user: null, accessToken: null, emailVerified: false, loading: false });
 		},
 
+		patchUser(partial: Partial<User>) {
+			update((s) => ({ ...s, user: s.user ? { ...s.user, ...partial } : s.user }));
+		},
+
 		setLoading(loading: boolean) {
 			update((s) => ({ ...s, loading }));
 		}

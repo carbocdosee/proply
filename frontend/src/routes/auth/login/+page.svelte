@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { _ } from 'svelte-i18n';
 	import { auth } from '$lib/api';
 	import { authStore } from '$lib/stores/auth';
 
@@ -10,15 +11,14 @@
 	let serverError = '';
 	let loading = false;
 
-	// Show error from OAuth redirect (e.g. ?error=state_mismatch)
 	$: oauthError = $page.url.searchParams.get('error');
 
 	function validate(): boolean {
 		errors = {};
-		if (!email) errors.email = 'Email is required';
-		else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = 'Enter a valid email';
-		if (!password) errors.password = 'Password is required';
-		else if (password.length < 8) errors.password = 'Password must be at least 8 characters';
+		if (!email) errors.email = $_('validation.email_required');
+		else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = $_('validation.email_invalid');
+		if (!password) errors.password = $_('validation.password_required');
+		else if (password.length < 8) errors.password = $_('validation.password_min');
 		return Object.keys(errors).length === 0;
 	}
 
@@ -33,9 +33,9 @@
 			goto('/dashboard');
 		} catch (e: unknown) {
 			if (e instanceof Error && e.message.includes('INVALID_CREDENTIALS')) {
-				serverError = 'Incorrect email or password.';
+				serverError = $_('auth.login.wrong_credentials');
 			} else {
-				serverError = 'Login failed. Please try again.';
+				serverError = $_('auth.login.failed');
 			}
 		} finally {
 			loading = false;
@@ -46,23 +46,23 @@
 </script>
 
 <svelte:head>
-	<title>Sign in — Proply</title>
+	<title>{$_('auth.login.page_title')}</title>
 </svelte:head>
 
-<h2 class="text-xl font-semibold text-gray-900 mb-6">Sign in</h2>
+<h2 class="text-xl font-semibold text-gray-900 mb-6">{$_('auth.login.heading')}</h2>
 
 {#if oauthError}
 	<div class="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
 		{oauthError === 'state_mismatch'
-			? 'Authentication failed. Please try again.'
+			? $_('auth.login.auth_failed')
 			: oauthError === 'oauth_not_configured'
-				? 'Google sign-in is not yet configured.'
-				: 'Sign-in error: ' + oauthError}
+				? $_('auth.login.google_not_configured')
+				: $_('auth.login.google_error') + oauthError}
 	</div>
 {/if}
 
 {#if serverError}
-	<div class="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+	<div data-testid="login-error" class="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
 		{serverError}
 	</div>
 {/if}
@@ -78,26 +78,27 @@
 		<path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
 		<path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
 	</svg>
-	Continue with Google
+	{$_('auth.google')}
 </a>
 
 <div class="relative mb-5">
 	<div class="absolute inset-0 flex items-center">
 		<div class="w-full border-t border-gray-100"></div>
 	</div>
-	<div class="relative flex justify-center text-xs text-gray-400 bg-white px-3">or</div>
+	<div class="relative flex justify-center text-xs text-gray-400 bg-white px-3">{$_('auth.or')}</div>
 </div>
 
 <form on:submit|preventDefault={handleLogin} class="space-y-4" novalidate>
 	<div>
-		<label for="email" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+		<label for="email" class="block text-sm font-medium text-gray-700 mb-1">{$_('auth.email')}</label>
 		<input
 			id="email"
+			data-testid="login-email"
 			type="email"
 			bind:value={email}
 			class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent
 				{errors.email ? 'border-red-300 bg-red-50' : 'border-gray-300'}"
-			placeholder="you@agency.com"
+			placeholder={$_('auth.email.placeholder')}
 			autocomplete="email"
 		/>
 		{#if errors.email}<p class="mt-1 text-xs text-red-500">{errors.email}</p>{/if}
@@ -105,11 +106,12 @@
 
 	<div>
 		<div class="flex items-center justify-between mb-1">
-			<label for="password" class="text-sm font-medium text-gray-700">Password</label>
-			<a href="/auth/magic-link" class="text-xs text-indigo-500 hover:underline">Forgot password?</a>
+			<label for="password" class="text-sm font-medium text-gray-700">{$_('auth.password')}</label>
+			<a href="/auth/magic-link" class="text-xs text-indigo-500 hover:underline">{$_('auth.login.forgot')}</a>
 		</div>
 		<input
 			id="password"
+			data-testid="login-password"
 			type="password"
 			bind:value={password}
 			class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent
@@ -121,14 +123,15 @@
 
 	<button
 		type="submit"
+		data-testid="login-submit"
 		disabled={loading}
 		class="w-full py-2.5 px-4 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 	>
-		{loading ? 'Signing in...' : 'Sign in'}
+		{loading ? $_('auth.login.submitting') : $_('auth.login.submit')}
 	</button>
 </form>
 
 <p class="mt-6 text-center text-sm text-gray-500">
-	Don't have an account?
-	<a href="/auth/register" class="text-indigo-600 hover:underline font-medium">Create account</a>
+	{$_('auth.no_account')}
+	<a href="/auth/register" class="text-indigo-600 hover:underline font-medium">{$_('auth.create_account_link')}</a>
 </p>

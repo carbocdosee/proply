@@ -223,21 +223,12 @@ func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.authSvc.VerifyEmailToken(r.Context(), token)
-	if err != nil {
-		http.Redirect(w, r, h.cfg.AppURL+"/auth/verify-email?error=invalid_token", http.StatusFound)
+	if _, err := h.authSvc.VerifyEmailToken(r.Context(), token); err != nil {
+		http.Redirect(w, r, h.cfg.AppURL+"/auth/verify-email?error=invalid_or_expired", http.StatusFound)
 		return
 	}
 
-	// Issue new access token with email_verified=true
-	accessToken, err := h.jwtManager.GenerateAccess(user.ID, user.Email, string(user.Plan), true)
-	if err != nil {
-		http.Redirect(w, r, h.cfg.AppURL+"/dashboard?verified=true", http.StatusFound)
-		return
-	}
-
-	// Pass new token via redirect query param so SvelteKit can store it in memory
-	http.Redirect(w, r, h.cfg.AppURL+"/auth/verify-email/success?token="+accessToken, http.StatusFound)
+	http.Redirect(w, r, h.cfg.AppURL+"/auth/verify-email?success=1", http.StatusFound)
 }
 
 // MagicLink handles POST /api/v1/auth/magic-link

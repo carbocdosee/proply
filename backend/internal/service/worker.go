@@ -15,6 +15,7 @@ import (
 type Worker struct {
 	db          *pgxpool.Pool
 	emailSender EmailSender
+	accountSvc  *AccountService
 }
 
 // EmailSender defines the interface for sending emails.
@@ -23,15 +24,19 @@ type EmailSender interface {
 }
 
 // NewWorker creates a new Worker.
-func NewWorker(db *pgxpool.Pool, emailSender EmailSender) *Worker {
-	return &Worker{db: db, emailSender: emailSender}
+func NewWorker(db *pgxpool.Pool, emailSender EmailSender, accountSvc *AccountService) *Worker {
+	return &Worker{db: db, emailSender: emailSender, accountSvc: accountSvc}
 }
 
 // Run starts the polling loop. Polls every 5 seconds.
+// Runs a daily retention purge at midnight UTC.
 // Blocks until ctx is cancelled.
 func (w *Worker) Run(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+	jobTicker := time.NewTicker(5 * time.Second)
+	defer jobTicker.Stop()
+
+	retentionTicker := time.NewTicker(24 * time.Hour)
+	defer retentionTicker.Stop()
 
 	slog.Info("worker: started, polling every 5s")
 
@@ -40,9 +45,17 @@ func (w *Worker) Run(ctx context.Context) {
 		case <-ctx.Done():
 			slog.Info("worker: stopped")
 			return
-		case <-ticker.C:
+		case <-jobTicker.C:
 			if err := w.processJobs(ctx); err != nil {
 				slog.Error("worker: process jobs error", "error", err)
+			}
+		case <-retentionTicker.C:
+			if w.accountSvc != nil {
+				if err := w.accountSvc.DeleteExpiredProposals(ctx); err != nil {
+					slog.Error("worker: retention purge failed", "error", err)
+				} else {
+					slog.Info("worker: retention purge completed")
+				}
 			}
 		}
 	}
@@ -110,17 +123,35 @@ func (w *Worker) handleEmailOpenNotify(ctx context.Context, payload json.RawMess
 	var p struct {
 		OwnerEmail    string `json:"owner_email"`
 		ProposalTitle string `json:"proposal_title"`
+		ClientName    string `json:"client_name"`   // display name (client_name or proposal title)
+		ProposalLink  string `json:"proposal_link"` // dashboard link
 		Country       string `json:"country"`
 	}
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("email_open_notify: unmarshal: %w", err)
 	}
 
-	subject := fmt.Sprintf("Клиент открыл ваш proposal: %s", p.ProposalTitle)
-	body := fmt.Sprintf(`<p>Ваш proposal <strong>%s</strong> был открыт клиентом.</p>`, p.ProposalTitle)
+	subject := fmt.Sprintf("%s opened your proposal", p.ClientName)
+
+	countryLine := ""
 	if p.Country != "" {
-		body += fmt.Sprintf(`<p>Страна: %s</p>`, p.Country)
+		countryLine = fmt.Sprintf(`<p style="color:#6b7280;font-size:14px">Location: %s</p>`, p.Country)
 	}
+
+	linkLine := ""
+	if p.ProposalLink != "" {
+		linkLine = fmt.Sprintf(
+			`<p><a href="%s" style="display:inline-block;padding:12px 24px;background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">View proposal</a></p>`,
+			p.ProposalLink,
+		)
+	}
+
+	body := fmt.Sprintf(`
+		<p>Your proposal <strong>%s</strong> was just opened.</p>
+		%s
+		%s
+		<p style="color:#9ca3af;font-size:12px">This notification is sent only on the first open.</p>
+	`, p.ProposalTitle, countryLine, linkLine)
 
 	return w.emailSender.Send(ctx, p.OwnerEmail, subject, body)
 }
@@ -130,14 +161,18 @@ func (w *Worker) handleEmailApprovedNotify(ctx context.Context, payload json.Raw
 		OwnerEmail    string `json:"owner_email"`
 		ProposalTitle string `json:"proposal_title"`
 		ClientEmail   string `json:"client_email"`
+		ApprovedAt    string `json:"approved_at"`
 	}
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("email_approved_notify: unmarshal: %w", err)
 	}
 
-	subject := fmt.Sprintf("Proposal согласован: %s", p.ProposalTitle)
-	body := fmt.Sprintf(`<p>Клиент <strong>%s</strong> согласовал proposal <strong>%s</strong>.</p>`,
-		p.ClientEmail, p.ProposalTitle)
+	subject := fmt.Sprintf("Proposal approved: %s", p.ProposalTitle)
+	body := fmt.Sprintf(`
+		<p>Your proposal <strong>%s</strong> has been approved.</p>
+		<p>Client email: <strong>%s</strong></p>
+		<p style="color:#6b7280;font-size:14px">Approved at: %s</p>
+	`, p.ProposalTitle, p.ClientEmail, p.ApprovedAt)
 
 	return w.emailSender.Send(ctx, p.OwnerEmail, subject, body)
 }
@@ -147,14 +182,18 @@ func (w *Worker) handleEmailClientApproved(ctx context.Context, payload json.Raw
 		ClientEmail   string `json:"client_email"`
 		AgencyName    string `json:"agency_name"`
 		ProposalTitle string `json:"proposal_title"`
+		ApprovedAt    string `json:"approved_at"`
 	}
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("email_client_approved: unmarshal: %w", err)
 	}
 
-	subject := fmt.Sprintf("Вы согласовали proposal от %s", p.AgencyName)
-	body := fmt.Sprintf(`<p>Вы согласовали коммерческое предложение <strong>%s</strong> от <strong>%s</strong>. Мы скоро свяжемся с вами.</p>`,
-		p.ProposalTitle, p.AgencyName)
+	subject := fmt.Sprintf("You approved a proposal from %s", p.AgencyName)
+	body := fmt.Sprintf(`
+		<p>You have approved the proposal <strong>%s</strong> from <strong>%s</strong>.</p>
+		<p>We will be in touch with you shortly.</p>
+		<p style="color:#6b7280;font-size:14px">Approved at: %s</p>
+	`, p.ProposalTitle, p.AgencyName, p.ApprovedAt)
 
 	return w.emailSender.Send(ctx, p.ClientEmail, subject, body)
 }

@@ -26,10 +26,13 @@ type Config struct {
 	GoogleRedirectURL  string
 	OAuthStateSecret   string // HMAC key for state parameter validation
 
-	// Resend (email)
+	// Email
 	ResendAPIKey  string
 	EmailFromAddr string
 	EmailFromName string
+	// SMTP — used when ResendAPIKey is empty (e.g. Mailpit on the test stand)
+	SMTPHost string
+	SMTPPort int
 
 	// Stripe
 	StripeSecretKey    string
@@ -66,6 +69,8 @@ func Load() (*Config, error) {
 		ResendAPIKey:        getEnv("RESEND_API_KEY", ""),
 		EmailFromAddr:       getEnv("EMAIL_FROM_ADDR", "noreply@proply.io"),
 		EmailFromName:       getEnv("EMAIL_FROM_NAME", "Proply"),
+		SMTPHost:            getEnv("SMTP_HOST", ""),
+		SMTPPort:            getEnvInt("SMTP_PORT", 1025),
 		StripeSecretKey:     getEnv("STRIPE_SECRET_KEY", ""),
 		StripeWebhookSecret: getEnv("STRIPE_WEBHOOK_SECRET", ""),
 		StripePriceProID:    getEnv("STRIPE_PRICE_PRO_ID", ""),

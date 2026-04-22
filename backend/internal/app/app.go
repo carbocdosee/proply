@@ -47,20 +47,26 @@ func New(cfg *config.Config) (*App, error) {
 	// Services
 	authSvc := service.NewAuthService(db, cfg.AppURL, cfg.EmailFromAddr, cfg.EmailFromName)
 	proposalSvc := service.NewProposalService(db)
-	trackingSvc := service.NewTrackingService(db)
+	trackingSvc := service.NewTrackingService(db, cfg.AppURL)
+	storageSvc := service.NewStorageService(cfg)
 	billingSvc := service.NewBillingService(db, cfg)
+	accountSvc := service.NewAccountService(db, storageSvc, billingSvc)
 
-	// Email sender
+	// Email sender — priority: Resend (production) → SMTP (test stand / Mailpit) → noop
 	var emailSender service.EmailSender
-	if cfg.ResendAPIKey != "" {
+	switch {
+	case cfg.ResendAPIKey != "":
 		emailSender = service.NewResendEmailSender(cfg.ResendAPIKey, cfg.EmailFromAddr, cfg.EmailFromName)
-	} else {
-		slog.Warn("app: RESEND_API_KEY not set, email sending is disabled")
+	case cfg.SMTPHost != "":
+		slog.Info("app: using SMTP email sender", "host", cfg.SMTPHost, "port", cfg.SMTPPort)
+		emailSender = service.NewSmtpEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.EmailFromAddr, cfg.EmailFromName)
+	default:
+		slog.Warn("app: no email sender configured, email sending is disabled")
 		emailSender = &noopEmailSender{}
 	}
 
 	// Background worker
-	worker := service.NewWorker(db, emailSender)
+	worker := service.NewWorker(db, emailSender, accountSvc)
 
 	// Handlers
 	authH := handler.NewAuthHandler(authSvc, jwtMgr, cfg)
@@ -68,6 +74,8 @@ func New(cfg *config.Config) (*App, error) {
 	publicH := handler.NewPublicHandler(proposalSvc)
 	trackingH := handler.NewTrackingHandler(trackingSvc)
 	billingH := handler.NewBillingHandler(billingSvc)
+	accountH := handler.NewAccountHandler(accountSvc)
+	uploadH := handler.NewUploadHandler(storageSvc)
 
 	// Router
 	r := chi.NewRouter()
@@ -103,6 +111,9 @@ func New(cfg *config.Config) (*App, error) {
 		r.Get("/google", authH.GoogleRedirect)
 		r.Get("/google/callback", authH.GoogleCallback)
 	})
+
+	// Template catalog (public — no auth required)
+	r.Get("/api/v1/templates", proposalH.ListTemplates)
 
 	// Authenticated proposal routes
 	r.Route("/api/v1/proposals", func(r chi.Router) {
@@ -143,6 +154,19 @@ func New(cfg *config.Config) (*App, error) {
 		r.Post("/checkout", billingH.CreateCheckout)
 		r.Post("/portal", billingH.CreatePortal)
 	})
+
+	// Account settings (authenticated)
+	r.Route("/api/v1/account", func(r chi.Router) {
+		r.Use(middleware.Auth(jwtMgr))
+		r.Patch("/", accountH.UpdateProfile)
+		r.Patch("/branding", accountH.UpdateBranding)
+		r.Patch("/retention", accountH.UpdateRetention)
+		r.Get("/export", accountH.ExportData)
+		r.Delete("/", accountH.DeleteAccount)
+	})
+
+	// Media upload — presigned URL generation (authenticated)
+	r.With(middleware.Auth(jwtMgr)).Post("/api/v1/upload/presign", uploadH.Presign)
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {

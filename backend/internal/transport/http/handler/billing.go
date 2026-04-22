@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 
@@ -19,6 +20,7 @@ func NewBillingHandler(billingSvc *service.BillingService) *BillingHandler {
 
 // StripeWebhook handles POST /api/v1/webhooks/stripe
 func (h *BillingHandler) StripeWebhook(w http.ResponseWriter, r *http.Request) {
+	// Read raw body first (Stripe signature verification requires the raw bytes)
 	body, err := io.ReadAll(io.LimitReader(r.Body, 65536))
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "READ_ERROR")
@@ -31,7 +33,7 @@ func (h *BillingHandler) StripeWebhook(w http.ResponseWriter, r *http.Request) {
 		case service.ErrInvalidSignature:
 			respondError(w, http.StatusBadRequest, "INVALID_SIGNATURE")
 		case service.ErrAlreadyProcessed:
-			// Idempotent: Stripe may retry
+			// Idempotent: Stripe may retry — respond 200 to stop retries
 			w.WriteHeader(http.StatusOK)
 		default:
 			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR")
@@ -53,18 +55,22 @@ func (h *BillingHandler) CreateCheckout(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Plan string `json:"plan"` // "pro" | "team"
 	}
-	if err := decodeJSON(r, &req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Plan == "" {
 		respondError(w, http.StatusBadRequest, "INVALID_JSON")
 		return
 	}
+	if req.Plan != "pro" && req.Plan != "team" {
+		respondError(w, http.StatusBadRequest, "INVALID_PLAN")
+		return
+	}
 
-	url, err := h.billingSvc.CreateCheckoutSession(r.Context(), claims.UserID, req.Plan)
+	checkoutURL, err := h.billingSvc.CreateCheckoutSession(r.Context(), claims.UserID, req.Plan)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR")
 		return
 	}
 
-	respondOK(w, map[string]string{"checkout_url": url})
+	respondOK(w, map[string]string{"checkout_url": checkoutURL})
 }
 
 // CreatePortal handles POST /api/v1/billing/portal
@@ -75,16 +81,11 @@ func (h *BillingHandler) CreatePortal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url, err := h.billingSvc.CreatePortalSession(r.Context(), claims.UserID)
+	portalURL, err := h.billingSvc.CreatePortalSession(r.Context(), claims.UserID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR")
 		return
 	}
 
-	respondOK(w, map[string]string{"portal_url": url})
-}
-
-// decodeJSON is a convenience wrapper for decoding request body.
-func decodeJSON(r *http.Request, v any) error {
-	return nil // implemented inline via json.NewDecoder in each handler
+	respondOK(w, map[string]string{"portal_url": portalURL})
 }

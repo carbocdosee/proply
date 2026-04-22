@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -31,6 +32,7 @@ func (h *ProposalHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	filter := service.ProposalFilter{
 		UserID:  claims.UserID,
+		Plan:    claims.Plan,
 		Status:  r.URL.Query().Get("status"),
 		Search:  r.URL.Query().Get("search"),
 		Sort:    r.URL.Query().Get("sort"),
@@ -154,7 +156,8 @@ func (h *ProposalHandler) Publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !claims.EmailVerified {
+	env := os.Getenv("ENV")
+	if !claims.EmailVerified && env != "development" && env != "test" {
 		respondError(w, http.StatusForbidden, "EMAIL_NOT_VERIFIED")
 		return
 	}
@@ -299,6 +302,11 @@ func (h *ProposalHandler) GetAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondOK(w, analytics)
+}
+
+// ListTemplates handles GET /api/v1/templates — returns the static template catalog.
+func (h *ProposalHandler) ListTemplates(w http.ResponseWriter, r *http.Request) {
+	respondOK(w, service.ListTemplates())
 }
 
 func parseIntParam(s string, def int) int {

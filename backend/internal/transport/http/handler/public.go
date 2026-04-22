@@ -27,6 +27,9 @@ func (h *PublicHandler) GetProposal(w http.ResponseWriter, r *http.Request) {
 	proposal, err := h.proposalSvc.GetPublic(r.Context(), slug)
 	if err != nil {
 		switch err {
+		case service.ErrRevoked:
+			// 410 Gone: slug existed but the owner has deactivated it.
+			respond(w, http.StatusGone, map[string]string{"code": "PROPOSAL_REVOKED"})
 		case service.ErrNotFound:
 			respondError(w, http.StatusNotFound, "NOT_FOUND")
 		default:

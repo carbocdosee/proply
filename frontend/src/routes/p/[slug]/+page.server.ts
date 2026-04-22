@@ -33,8 +33,13 @@ export const load: PageServerLoad = async ({ params, request, fetch }) => {
 	if (res.status === 401) {
 		const body = await res.json();
 		if (body.code === 'PASSWORD_REQUIRED') {
-			return { proposal: null, passwordRequired: true, slug };
+			return { proposal: null, passwordRequired: true, revoked: false, slug };
 		}
+	}
+
+	if (res.status === 410) {
+		// Slug existed but the owner has revoked it — show a friendly stub page.
+		return { proposal: null, passwordRequired: false, revoked: true, slug };
 	}
 
 	if (res.status === 404) {
@@ -46,5 +51,5 @@ export const load: PageServerLoad = async ({ params, request, fetch }) => {
 	}
 
 	const proposal = await res.json();
-	return { proposal, passwordRequired: false, slug };
+	return { proposal, passwordRequired: false, revoked: false, slug };
 };

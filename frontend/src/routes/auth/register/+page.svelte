@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { _ } from 'svelte-i18n';
 	import { auth } from '$lib/api';
 	import { authStore } from '$lib/stores/auth';
 
@@ -14,11 +15,11 @@
 
 	function validate(): boolean {
 		errors = {};
-		if (!name.trim()) errors.name = 'Name is required';
-		if (!email) errors.email = 'Email is required';
-		else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = 'Enter a valid email';
-		if (!password) errors.password = 'Password is required';
-		else if (password.length < 8) errors.password = 'Password must be at least 8 characters';
+		if (!name.trim()) errors.name = $_('validation.name_required');
+		if (!email) errors.email = $_('validation.email_required');
+		else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = $_('validation.email_invalid');
+		if (!password) errors.password = $_('validation.password_required');
+		else if (password.length < 8) errors.password = $_('validation.password_min');
 		return Object.keys(errors).length === 0;
 	}
 
@@ -33,11 +34,11 @@
 			goto('/dashboard');
 		} catch (e: unknown) {
 			if (e instanceof Error && e.message.includes('EMAIL_EXISTS')) {
-				serverError = 'An account with this email already exists.';
+				serverError = $_('auth.register.email_exists');
 			} else if (e instanceof Error && e.message.includes('VALIDATION_ERROR')) {
-				serverError = 'Please check your inputs and try again.';
+				serverError = $_('auth.register.invalid_inputs');
 			} else {
-				serverError = 'Registration failed. Please try again.';
+				serverError = $_('auth.register.failed');
 			}
 		} finally {
 			loading = false;
@@ -46,13 +47,13 @@
 </script>
 
 <svelte:head>
-	<title>Create account — Proply</title>
+	<title>{$_('auth.register.page_title')}</title>
 </svelte:head>
 
-<h2 class="text-xl font-semibold text-gray-900 mb-6">Create account</h2>
+<h2 class="text-xl font-semibold text-gray-900 mb-6">{$_('auth.register.heading')}</h2>
 
 {#if serverError}
-	<div class="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+	<div data-testid="register-error" class="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
 		{serverError}
 	</div>
 {/if}
@@ -68,54 +69,57 @@
 		<path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
 		<path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
 	</svg>
-	Continue with Google
+	{$_('auth.google')}
 </a>
 
 <div class="relative mb-5">
 	<div class="absolute inset-0 flex items-center">
 		<div class="w-full border-t border-gray-100"></div>
 	</div>
-	<div class="relative flex justify-center text-xs text-gray-400 bg-white px-3">or</div>
+	<div class="relative flex justify-center text-xs text-gray-400 bg-white px-3">{$_('auth.or')}</div>
 </div>
 
 <form on:submit|preventDefault={handleRegister} class="space-y-4" novalidate>
 	<div>
-		<label for="name" class="block text-sm font-medium text-gray-700 mb-1">Your name</label>
+		<label for="name" class="block text-sm font-medium text-gray-700 mb-1">{$_('auth.name')}</label>
 		<input
 			id="name"
+			data-testid="register-name"
 			type="text"
 			bind:value={name}
 			class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent
 				{errors.name ? 'border-red-300 bg-red-50' : 'border-gray-300'}"
-			placeholder="Jane Smith"
+			placeholder={$_('auth.name.placeholder')}
 			autocomplete="name"
 		/>
 		{#if errors.name}<p class="mt-1 text-xs text-red-500">{errors.name}</p>{/if}
 	</div>
 
 	<div>
-		<label for="email" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+		<label for="email" class="block text-sm font-medium text-gray-700 mb-1">{$_('auth.email')}</label>
 		<input
 			id="email"
+			data-testid="register-email"
 			type="email"
 			bind:value={email}
 			class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent
 				{errors.email ? 'border-red-300 bg-red-50' : 'border-gray-300'}"
-			placeholder="you@agency.com"
+			placeholder={$_('auth.email.placeholder')}
 			autocomplete="email"
 		/>
 		{#if errors.email}<p class="mt-1 text-xs text-red-500">{errors.email}</p>{/if}
 	</div>
 
 	<div>
-		<label for="password" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+		<label for="password" class="block text-sm font-medium text-gray-700 mb-1">{$_('auth.password')}</label>
 		<input
 			id="password"
+			data-testid="register-password"
 			type="password"
 			bind:value={password}
 			class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent
 				{errors.password ? 'border-red-300 bg-red-50' : 'border-gray-300'}"
-			placeholder="Min. 8 characters"
+			placeholder={$_('auth.register.password_hint')}
 			autocomplete="new-password"
 		/>
 		{#if errors.password}<p class="mt-1 text-xs text-red-500">{errors.password}</p>{/if}
@@ -123,20 +127,21 @@
 
 	<button
 		type="submit"
+		data-testid="register-submit"
 		disabled={loading}
 		class="w-full py-2.5 px-4 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 	>
-		{loading ? 'Creating account...' : 'Create account'}
+		{loading ? $_('auth.register.submitting') : $_('auth.register.submit')}
 	</button>
 </form>
 
 <p class="mt-4 text-xs text-center text-gray-400">
-	By creating an account you agree to our
-	<a href="/legal/terms" class="underline">Terms</a> and
-	<a href="/legal/privacy" class="underline">Privacy Policy</a>.
+	{$_('auth.agree')}
+	<a href="/legal/terms" class="underline">{$_('auth.terms')}</a> and
+	<a href="/legal/privacy" class="underline">{$_('auth.privacy')}</a>.
 </p>
 
 <p class="mt-4 text-center text-sm text-gray-500">
-	Already have an account?
-	<a href="/auth/login" class="text-indigo-600 hover:underline font-medium">Sign in</a>
+	{$_('auth.have_account')}
+	<a href="/auth/login" class="text-indigo-600 hover:underline font-medium">{$_('auth.sign_in_link')}</a>
 </p>

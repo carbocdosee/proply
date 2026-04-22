@@ -97,6 +97,79 @@ export const auth = {
 		})
 };
 
+// Account settings
+export const account = {
+	updateProfile: (token: string, data: { name?: string; language?: string }) =>
+		request<{ status: string }>('/api/v1/account', {
+			method: 'PATCH',
+			token,
+			body: JSON.stringify(data)
+		}),
+
+	updateBranding: (
+		token: string,
+		data: {
+			logo_url?: string | null;
+			primary_color?: string;
+			accent_color?: string;
+			hide_proply_footer?: boolean;
+		}
+	) =>
+		request<Record<string, never>>('/api/v1/account/branding', {
+			method: 'PATCH',
+			token,
+			body: JSON.stringify(data)
+		}),
+
+	updateRetention: (token: string, months: 12 | 24 | 36) =>
+		request<{ status: string }>('/api/v1/account/retention', {
+			method: 'PATCH',
+			token,
+			body: JSON.stringify({ months })
+		}),
+
+	exportData: (token: string) =>
+		fetch(`${API_BASE}/api/v1/account/export`, {
+			headers: { Authorization: `Bearer ${token}` },
+			credentials: 'include'
+		}),
+
+	deleteAccount: (token: string) =>
+		request<void>('/api/v1/account', {
+			method: 'DELETE',
+			token
+		})
+};
+
+// Media upload — presigned S3 URL
+export const upload = {
+	presign: (
+		token: string,
+		data: {
+			file_type: 'logo' | 'case_study' | 'team_member';
+			content_type: string;
+			size_bytes: number;
+			proposal_id?: string;
+			block_id?: string;
+		}
+	) =>
+		request<{ upload_url: string; file_url: string }>('/api/v1/upload/presign', {
+			method: 'POST',
+			token,
+			body: JSON.stringify(data)
+		}),
+
+	/** PUT file directly to S3 presigned URL — bypasses the Go API. */
+	putToS3: async (uploadUrl: string, file: File): Promise<void> => {
+		const res = await fetch(uploadUrl, {
+			method: 'PUT',
+			body: file,
+			headers: { 'Content-Type': file.type }
+		});
+		if (!res.ok) throw new Error(`S3 upload failed: ${res.status}`);
+	}
+};
+
 // Proposals
 export const proposals = {
 	list: (token: string, params?: Record<string, string>) => {
@@ -137,6 +210,43 @@ export const proposals = {
 		request<Analytics>(`/api/v1/proposals/${id}/analytics`, { token })
 };
 
+// Templates (public, no auth)
+export interface TemplateMeta {
+	id: string;
+	name: string;
+	description: string;
+	block_types: string[];
+}
+
+export const templates = {
+	list: () => request<TemplateMeta[]>('/api/v1/templates')
+};
+
+// Billing
+export const billing = {
+	createCheckout: (token: string, plan: 'pro' | 'team') =>
+		request<{ checkout_url: string }>('/api/v1/billing/checkout', {
+			method: 'POST',
+			token,
+			body: JSON.stringify({ plan })
+		}),
+
+	createPortal: (token: string) =>
+		request<{ portal_url: string }>('/api/v1/billing/portal', {
+			method: 'POST',
+			token
+		})
+};
+
+// Public tracking (no auth)
+export const trackingApi = {
+	trackBlockTime: (slug: string, events: Array<{ block_id: string; duration_ms: number }>) =>
+		request<void>('/api/v1/track/block-time', {
+			method: 'POST',
+			body: JSON.stringify({ slug, events })
+		})
+};
+
 // Public (no auth)
 export const publicApi = {
 	getProposal: (slug: string, password?: string) => {
@@ -163,6 +273,7 @@ export interface User {
 	primary_color: string;
 	accent_color: string;
 	hide_proply_footer: boolean;
+	data_retention_months: number;
 	email_verified_at: string | null;
 	created_at: string;
 }

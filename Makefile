@@ -3,7 +3,7 @@ FRONTEND_DIR := ./frontend
 
 .PHONY: local local-back local-front \
         infra-up infra-down \
-        test-up test-down test-logs test-ps \
+        test-up test-down test-logs test-ps test-run \
         prod-up prod-down \
         install tidy
 
@@ -42,6 +42,9 @@ test-logs:
 
 test-ps:
 	docker compose -f docker-compose.test.yml --env-file envs/test/compose.env ps
+
+test-run:
+	bash scripts/test-run.sh $(ARGS)
 
 # ── Production ────────────────────────────────────────────────────────────────
 # Requires: envs/prod/compose.env, envs/prod/backend.env, envs/prod/frontend.env

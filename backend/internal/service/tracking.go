@@ -10,26 +10,27 @@ import (
 
 // TrackingService handles proposal view tracking.
 type TrackingService struct {
-	db *pgxpool.Pool
+	db     *pgxpool.Pool
+	appURL string // base URL for dashboard links in emails
 }
 
 // NewTrackingService creates a new TrackingService.
-func NewTrackingService(db *pgxpool.Pool) *TrackingService {
-	return &TrackingService{db: db}
+func NewTrackingService(db *pgxpool.Pool, appURL string) *TrackingService {
+	return &TrackingService{db: db, appURL: appURL}
 }
 
 // TrackOpen records an 'open' event for a proposal.
 // Uses server-side tracking (called from SvelteKit SSR) to bypass ad blockers.
 func (s *TrackingService) TrackOpen(ctx context.Context, proposalSlug, ip, userAgent, country string) error {
-	// Resolve proposal ID
-	var proposalID string
-	var ownerEmail, proposalTitle string
+	// Resolve proposal ID and owner info
+	var proposalID, ownerEmail, proposalTitle string
+	var clientName *string
 	err := s.db.QueryRow(ctx, `
-		SELECT p.id, u.email, p.title
+		SELECT p.id, u.email, p.title, p.client_name
 		FROM proposals p
 		JOIN users u ON u.id = p.user_id
 		WHERE p.slug = $1 AND p.slug_active = true AND p.deleted_at IS NULL
-	`, proposalSlug).Scan(&proposalID, &ownerEmail, &proposalTitle)
+	`, proposalSlug).Scan(&proposalID, &ownerEmail, &proposalTitle, &clientName)
 	if err != nil {
 		return ErrNotFound
 	}
@@ -68,29 +69,40 @@ func (s *TrackingService) TrackOpen(ctx context.Context, proposalSlug, ip, userA
 		return fmt.Errorf("tracking: insert event: %w", err)
 	}
 
-	// Update proposal counters; on first open → update status and enqueue email
-	var firstOpen bool
-	err = tx.QueryRow(ctx, `
+	// Update proposal counters.
+	// Status advances to 'opened' only when coming from 'sent' to avoid overwriting 'approved'.
+	// first_opened_at is set only on the first ever open (COALESCE preserves existing value).
+	_, err = tx.Exec(ctx, `
 		UPDATE proposals SET
-			open_count = open_count + 1,
-			last_opened_at = NOW(),
+			open_count      = open_count + 1,
+			last_opened_at  = NOW(),
 			first_opened_at = COALESCE(first_opened_at, NOW()),
-			status = CASE WHEN first_opened_at IS NULL THEN 'opened' ELSE status END
+			status          = CASE WHEN status = 'sent' THEN 'opened' ELSE status END
 		WHERE id = $1
-		RETURNING (first_opened_at IS NULL)
-	`, proposalID).Scan(&firstOpen)
-	// Note: the RETURNING expression above checks the *old* value via IS NULL
-	// because the update sets it conditionally; use a flag approach instead
-	_ = firstOpen // simplified: always check after update
+	`, proposalID)
+	if err != nil {
+		return fmt.Errorf("tracking: update proposal: %w", err)
+	}
 
-	// Enqueue email notification for owner on first open
+	// Build dashboard link for the email
+	proposalLink := fmt.Sprintf("%s/dashboard/proposals/%s", s.appURL, proposalID)
+
+	// Use client_name in the email subject when available
+	displayName := proposalTitle
+	if clientName != nil && *clientName != "" {
+		displayName = *clientName
+	}
+
+	// Enqueue first-open email notification — WHERE NOT EXISTS prevents duplicates
 	_, err = tx.Exec(ctx, `
 		INSERT INTO job_queue (job_type, payload)
 		SELECT 'email_open_notify', jsonb_build_object(
-			'proposal_id', $1::text,
-			'owner_email', $2,
+			'proposal_id',    $1::text,
+			'owner_email',    $2,
 			'proposal_title', $3,
-			'country', $4::text
+			'client_name',    $4,
+			'proposal_link',  $5,
+			'country',        $6::text
 		)
 		WHERE NOT EXISTS (
 			SELECT 1 FROM job_queue
@@ -98,7 +110,7 @@ func (s *TrackingService) TrackOpen(ctx context.Context, proposalSlug, ip, userA
 			  AND payload->>'proposal_id' = $1::text
 			  AND status IN ('pending', 'processing', 'done')
 		)
-	`, proposalID, ownerEmail, proposalTitle, country)
+	`, proposalID, ownerEmail, proposalTitle, displayName, proposalLink, country)
 	if err != nil {
 		return fmt.Errorf("tracking: enqueue email: %w", err)
 	}
